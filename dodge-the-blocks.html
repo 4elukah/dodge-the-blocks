@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Уклоняйся</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body {
+    width:100%; height:100%; overflow:hidden;
+    background:#0a0a12; color:#eee;
+    font-family:system-ui, sans-serif; user-select:none;
+  }
+
+  #hud {
+    position:fixed; top:0; left:0; width:100%;
+    display:flex; justify-content:center; gap:50px;
+    padding:16px; font-size:22px; z-index:2; pointer-events:none;
+    text-shadow:0 2px 6px #000;
+  }
+  #hud span { color:#60a5fa; font-weight:700; }
+
+  #board { position:relative; width:100vw; height:100vh; overflow:hidden; }
+
+  #player {
+    position:absolute; width:36px; height:36px;
+    background:#60a5fa; border-radius:50%;
+    box-shadow:0 0 20px rgba(96,165,250,.8);
+    transform:translate(-50%,-50%);
+  }
+
+  .block {
+    position:absolute; width:60px; height:24px;
+    background:#ef4444; border-radius:6px;
+    box-shadow:0 0 12px rgba(239,68,68,.7);
+  }
+
+  /* лидерборд в углу во время игры */
+  #lb-mini {
+    position:fixed; top:60px; right:16px; z-index:2;
+    background:rgba(255,255,255,.05); border-radius:10px;
+    padding:10px 14px; font-size:15px; min-width:200px;
+    pointer-events:none;
+  }
+  #lb-mini h4 { font-size:15px; color:#60a5fa; margin-bottom:6px; }
+  #lb-mini li {
+    display:flex; justify-content:space-between; padding:2px 0;
+    list-style:none; font-size:14px;
+  }
+  #lb-mini li.me { color:#facc15; font-weight:700; }
+
+  /* меню */
+  #menu, #over {
+    position:absolute; inset:0; background:rgba(0,0,0,.92);
+    display:none; flex-direction:column; align-items:center;
+    justify-content:center; gap:16px; font-size:30px; z-index:3;
+  }
+  #menu { display:flex; }
+  #menu h1 { font-size:48px; color:#60a5fa; margin-bottom:6px; }
+  #menu p { font-size:18px; opacity:.7; }
+  button.btn {
+    padding:12px 32px; font-size:22px; border:none; border-radius:10px;
+    background:#60a5fa; color:#012; cursor:pointer; font-weight:700;
+  }
+  button.btn:hover { background:#3b82f6; }
+
+  #leaderboard, #leaderboard-menu {
+    font-size:18px; width:420px;
+    background:rgba(255,255,255,.05); border-radius:10px; padding:14px 20px;
+  }
+  #leaderboard h3, #leaderboard-menu h3 {
+    margin-bottom:8px; font-size:20px; color:#60a5fa;
+  }
+  #leaderboard ol, #leaderboard-menu ol { list-style:none; }
+  #leaderboard li, #leaderboard-menu li {
+    display:flex; justify-content:space-between; padding:4px 0;
+    border-bottom:1px solid rgba(255,255,255,.08);
+  }
+  #leaderboard li.me, #leaderboard-menu li.me {
+    color:#facc15; font-weight:700;
+  }
+  #leaderboard li span:last-child, #leaderboard-menu li span:last-child { color:#60a5fa; }
+  #leaderboard li.me span:last-child,
+  #leaderboard-menu li.me span:last-child { color:#facc15; }
+</style>
+</head>
+<body>
+  <div id="hud">
+    <div>Время: <span id="time">0</span>с</div>
+    <div>Скорость: <span id="speed">1</span></div>
+    <div>Рекорд: <span id="best">0</span>с</div>
+  </div>
+
+  <div id="lb-mini">
+    <h4>🏆 Топ</h4>
+    <ol id="lb-mini-list"></ol>
+  </div>
+
+  <div id="board">
+    <div id="player"></div>
+  </div>
+
+  <div id="menu">
+    <h1>Уклоняйся</h1>
+    <p>Управление: мышь или WASD / стрелки</p>
+    <button class="btn" id="play">Играть</button>
+    <div id="leaderboard-menu">
+      <h3>🏆 Лидерборд</h3>
+      <ol id="lb-menu-list"></ol>
+    </div>
+  </div>
+
+  <div id="over">
+    <div>Тебя раздавило</div>
+    <div id="final"></div>
+    <div id="leaderboard">
+      <h3>🏆 Лидерборд</h3>
+      <ol id="lb-list"></ol>
+    </div>
+    <button class="btn" id="restart">Заново</button>
+  </div>
+
+<script>
+const VERSION = 'v6';
+
+// ====== ЛИДЕРБОРД ======
+const ME = 'Автор';
+const MY_GLOBAL_RECORD = 2402;
+const LB_KEY = 'dodgeLeaderboard';
+
+function loadBoard() {
+  let raw = localStorage.getItem(LB_KEY);
+  let list = raw ? JSON.parse(raw) : [];
+  list = list.filter(e => e.name !== 'Артем');
+
+  const myIdx = list.findIndex(e => e.name === ME);
+  if (myIdx >= 0) {
+    list[myIdx].score = Math.max(list[myIdx].score, MY_GLOBAL_RECORD);
+  } else {
+    list.push({ name: ME, score: MY_GLOBAL_RECORD });
+  }
+  list.sort((a, b) => b.score - a.score);
+  localStorage.setItem(LB_KEY, JSON.stringify(list));
+  return list;
+}
+
+function fillList(elId, limit) {
+  const list = loadBoard();
+  const ol = document.getElementById(elId);
+  ol.innerHTML = '';
+  list.slice(0, limit).forEach(e => {
+    const li = document.createElement('li');
+    li.className = (e.name === ME) ? 'me' : '';
+    li.innerHTML = '<span>' + e.name + '</span><span>' + e.score + 'с</span>';
+    ol.appendChild(li);
+  });
+}
+
+function renderAllBoards() {
+  fillList('lb-list', 10);
+  fillList('lb-menu-list', 10);
+  fillList('lb-mini-list', 5);
+}
+
+function submitScore(secs) {
+  let list = loadBoard();
+  const myIdx = list.findIndex(e => e.name === ME);
+  if (myIdx >= 0) {
+    if (secs > list[myIdx].score) {
+      list[myIdx].score = secs;
+      localStorage.setItem(LB_KEY, JSON.stringify(list));
+    }
+  } else {
+    list.push({ name: ME, score: secs });
+    list.sort((a, b) => b.score - a.score);
+    localStorage.setItem(LB_KEY, JSON.stringify(list));
+  }
+  renderAllBoards();
+}
+
+// ====== ИГРА ======
+const board   = document.getElementById('board');
+const player  = document.getElementById('player');
+const timeEl  = document.getElementById('time');
+const speedEl = document.getElementById('speed');
+const bestEl  = document.getElementById('best');
+const over    = document.getElementById('over');
+const menu    = document.getElementById('menu');
+const finalEl = document.getElementById('final');
+const restart = document.getElementById('restart');
+const playBtn = document.getElementById('play');
+
+const keys = {};
+let px, py, blocks, playing, startTime, lastSpawn, spawnGap;
+let elapsed = 0, speed = 1;
+const bestKey = 'dodgeBest_' + VERSION;
+let best = +(localStorage.getItem(bestKey) || 0);
+bestEl.textContent = best;
+
+document.addEventListener('keydown', e => keys[e.key] = true);
+document.addEventListener('keyup',   e => keys[e.key] = false);
+
+board.addEventListener('mousemove', e => {
+  if (!playing) return;
+  px = e.clientX;
+  py = e.clientY;
+});
+
+function reset() {
+  blocks = [];
+  document.querySelectorAll('.block').forEach(b => b.remove());
+
+  px = window.innerWidth / 2;
+  py = window.innerHeight / 2;
+  player.style.left = px + 'px';
+  player.style.top  = py + 'px';
+
+  playing = true;
+  elapsed = 0;
+  speed = 1;
+  spawnGap = 700;
+  lastSpawn = performance.now();
+  startTime = performance.now();
+
+  timeEl.textContent = '0';
+  speedEl.textContent = '1';
+  over.style.display = 'none';
+  menu.style.display = 'none';
+  document.getElementById('lb-mini').style.display = 'block';
+
+  requestAnimationFrame(loop);
+}
+
+function showMenu() {
+  playing = false;
+  document.querySelectorAll('.block').forEach(b => b.remove());
+  blocks = [];
+  document.getElementById('lb-mini').style.display = 'none';
+  menu.style.display = 'flex';
+  over.style.display = 'none';
+  renderAllBoards();
+}
+
+function spawn() {
+  const b = document.createElement('div');
+  b.className = 'block';
+  const w = 40 + Math.random() * 80;
+  b.style.width = w + 'px';
+  b.style.left = Math.random() * (window.innerWidth - w) + 'px';
+  b.style.top = '-30px';
+  board.appendChild(b);
+  blocks.push({
+    el: b,
+    x: parseFloat(b.style.left),
+    y: -30,
+    w: w,
+    h: 24,
+    vy: 150 + Math.random() * 120
+  });
+}
+
+function hit(px, py, pr, rx, ry, rw, rh) {
+  const cx = Math.max(rx, Math.min(px, rx + rw));
+  const cy = Math.max(ry, Math.min(py, ry + rh));
+  const dx = px - cx, dy = py - cy;
+  return dx * dx + dy * dy < pr * pr;
+}
+
+function gameOver() {
+  playing = false;
+  const secs = Math.floor(elapsed / 1000);
+
+  let record = false;
+  if (secs > best) {
+    best = secs;
+    localStorage.setItem(bestKey, best);
+    bestEl.textContent = best;
+    record = true;
+  }
+
+  submitScore(secs);
+
+  finalEl.textContent = (record ? '🏆 Новый рекорд! ' : '') +
+                        'Продержался: ' + secs + 'с';
+  over.style.display = 'flex';
+  document.getElementById('lb-mini').style.display = 'none';
+}
+
+function loop(now) {
+  if (!playing) return;
+  const dt = 16 / 1000;
+
+  elapsed = now - startTime;
+  timeEl.textContent = Math.floor(elapsed / 1000);
+
+  speed = 1 + Math.floor(elapsed / 100);
+  speedEl.textContent = speed;
+
+  const sp = 4 * speed;
+  if (keys['ArrowLeft']  || keys['a'] || keys['A']) px -= sp;
+  if (keys['ArrowRight'] || keys['d'] || keys['D']) px += sp;
+  if (keys['ArrowUp']    || keys['w'] || keys['W']) py -= sp;
+  if (keys['ArrowDown']  || keys['s'] || keys['S']) py += sp;
+
+  px = Math.max(18, Math.min(window.innerWidth  - 18, px));
+  py = Math.max(18, Math.min(window.innerHeight - 18, py));
+  player.style.left = px + 'px';
+  player.style.top  = py + 'px';
+
+  spawnGap = Math.max(180, 700 - elapsed / 30);
+  if (now - lastSpawn > spawnGap) {
+    spawn();
+    lastSpawn = now;
+  }
+
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const b = blocks[i];
+    const oldY = b.y;
+    b.y += (b.vy * speed) * dt;
+
+    const steps = Math.max(1, Math.ceil((b.y - oldY) / 8));
+    let dead = false;
+    for (let s = 1; s <= steps; s++) {
+      const yy = oldY + (b.y - oldY) * (s / steps);
+      if (hit(px, py, 18, b.x, yy, b.w, b.h)) { dead = true; break; }
+    }
+
+    b.el.style.top = b.y + 'px';
+
+    if (dead) { gameOver(); return; }
+
+    if (b.y > window.innerHeight) {
+      b.el.remove();
+      blocks.splice(i, 1);
+    }
+  }
+
+  requestAnimationFrame(loop);
+}
+
+restart.addEventListener('click', reset);
+playBtn.addEventListener('click', reset);
+
+renderAllBoards();
+showMenu();
+</script>
+</body>
+</html>
